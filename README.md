@@ -54,7 +54,13 @@ sed -i 's/\r$//' ~/Downloads/install_comfyui_manjaro.sh && bash ~/Downloads/inst
 | `archiver.py` | Tars up a Redmine backup with a dated archive name. |
 | `WinEvenniaInstaller.py` | Clones and sets up an Evennia MUD under `C:/EvenniaWorlds`. |
 | `Launcher.java` | Small Swing launcher window. |
-| `PPM2PNG/` | Batch-converts PPM images to PNG from a file list. See [PPM2PNG/README.md](PPM2PNG/README.md). |
+
+### Applications
+
+| Project | What it does |
+| --- | --- |
+| [`AutoTranslate/`](AutoTranslate/README.md) | Batch-translates a folder of images with a local vision model (Ollama or LM Studio), writing a `.txt` beside each image. Tkinter GUI plus a headless `--cli` mode; installers for Windows and Linux. |
+| [`PPM2PNG/`](PPM2PNG/README.md) | Batch-converts PPM images to PNG from a text file list. |
 
 ### Notes
 

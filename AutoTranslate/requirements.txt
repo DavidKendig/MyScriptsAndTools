@@ -1,0 +1,4 @@
+# AutoTranslate runs on the Python standard library alone.
+# Pillow is optional but strongly recommended: it downscales and re-encodes
+# pages before upload, which cuts VRAM use and speeds up local models a lot.
+Pillow>=10.0.0

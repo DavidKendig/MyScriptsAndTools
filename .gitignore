@@ -9,9 +9,6 @@ venv/
 env/
 *.egg-info/
 
-# Virtualenv-heavy sub-projects
-AutoTranslate/
-
 # Editors / IDEs
 .idea/
 .vscode/
