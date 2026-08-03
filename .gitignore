@@ -1,0 +1,24 @@
+# Local Claude Code settings
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and archives produced by the scripts here
+*.log
+*.tar.gz
