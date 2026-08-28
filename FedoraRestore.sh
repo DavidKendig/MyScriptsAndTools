@@ -3,21 +3,18 @@
 # FedoraRestore.sh - Rebuild a personal Fedora Workstation app set after a fresh install.
 #
 # Removes Firefox and installs: Brave, GNOME Extension Manager, Dash to Dock,
-# VLC, LibreOffice Base, PyCharm Community, IntelliJ IDEA Community, OBS Studio,
-# LM Studio, opencode, Sublime Text, Steam, Obsidian, the latest OpenJDK,
-# Python, and the Claude Code CLI.
+# VLC, LibreOffice Base, JetBrains Toolbox, OBS Studio, LM Studio, opencode,
+# Sublime Text, Steam, Obsidian, HexChat, PuTTY, nomacs, Bottles,
+# Angry IP Scanner, the latest OpenJDK, Python, and the Claude Code CLI.
 #
-# Usage:  ./FedoraRestore.sh                  # run everything
-#         ./FedoraRestore.sh --dry-run        # print the commands without running them
-#         ./FedoraRestore.sh --with-desktop   # also set up the Claude desktop app
-#                                             # in an Ubuntu distrobox (see notes below)
+# Usage:  ./FedoraRestore.sh            # run everything
+#         ./FedoraRestore.sh --dry-run  # print the commands without running them
 #
 # Run as your normal user; the script calls sudo where it needs root.
 
 set -uo pipefail
 
 DRY_RUN=0
-WITH_DESKTOP=0
 
 # Print the header comment block (everything after the shebang up to the first
 # line that isn't a comment).
@@ -28,9 +25,8 @@ usage() {
 
 while (( $# )); do
     case "$1" in
-        --dry-run)      DRY_RUN=1 ;;
-        --with-desktop) WITH_DESKTOP=1 ;;
-        -h|--help)      usage 0 ;;
+        --dry-run) DRY_RUN=1 ;;
+        -h|--help) usage 0 ;;
         *) printf 'Unknown option: %s\n\n' "$1" >&2; usage 1 ;;
     esac
     shift
@@ -39,13 +35,12 @@ done
 SUCCEEDED=()
 FAILED=()
 
-# Anthropic's release signing key, used for both the CLI rpm repo and the
-# desktop app's apt repo. Verify at https://code.claude.com/docs/en/setup
+# Anthropic's release signing key for the Claude Code rpm repo.
+# Verify at https://code.claude.com/docs/en/setup
 CLAUDE_KEY_FPR="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
 
-# Ubuntu container used for the (Debian-only) Claude desktop app.
-DESKTOP_BOX="${DESKTOP_BOX:-claude-desktop}"
-DESKTOP_IMAGE="${DESKTOP_IMAGE:-ubuntu:24.04}"
+# JetBrains Toolbox, which manages the IDE installs itself.
+TOOLBOX_DIR="${TOOLBOX_DIR:-$HOME/.local/share/JetBrains/Toolbox/bin}"
 
 # LM Studio ships as an AppImage with a versioned URL. Override if this 404s:
 #   LMSTUDIO_URL=https://installers.lmstudio.ai/linux/x64/<version>/LM-Studio-<version>-x64.AppImage ./FedoraRestore.sh
@@ -183,6 +178,16 @@ step "Install Steam (RPM Fusion nonfree)" \
 step "Install LibreOffice Base" \
     sudo dnf install -y libreoffice-base
 
+step "Install nomacs" \
+    sudo dnf install -y nomacs
+
+step "Install PuTTY" \
+    sudo dnf install -y putty
+
+# Upstream HexChat development stopped in 2024; Fedora still ships the package.
+step "Install HexChat" \
+    sudo dnf install -y hexchat
+
 step "Install the Dash to Dock GNOME extension" \
     sudo dnf install -y gnome-shell-extension-dash-to-dock
 
@@ -224,14 +229,139 @@ step "Install Python (system python3 + pip, plus the newest packaged version)" \
 step "Install GNOME Extension Manager" \
     flatpak install -y --user flathub com.mattjakeman.ExtensionManager
 
-step "Install PyCharm Community" \
-    flatpak install -y --user flathub com.jetbrains.PyCharm-Community
-
-step "Install IntelliJ IDEA Community" \
-    flatpak install -y --user flathub com.jetbrains.IntelliJ-IDEA-Community
-
 step "Install Obsidian" \
     flatpak install -y --user flathub md.obsidian.Obsidian
+
+# Bottles ships as a flatpak only - upstream doesn't support other packaging,
+# and there is no bottles rpm in the Fedora repos.
+step "Install Bottles" \
+    flatpak install -y --user flathub com.usebottles.bottles
+
+# --------------------------------------------------------- Angry IP Scanner ---
+
+# Distributed as an rpm on GitHub releases (x86_64 only); needs a JRE, which
+# the OpenJDK step above provides.
+install_ipscan() {
+    if [[ "$(uname -m)" != "x86_64" ]]; then
+        warn "Angry IP Scanner publishes an rpm for x86_64 only - skipping on $(uname -m)"
+        warn "Use the ipscan-any jar from https://github.com/angryip/ipscan/releases instead"
+        return 0
+    fi
+
+    local url
+    url="$(curl -fsSL https://api.github.com/repos/angryip/ipscan/releases/latest \
+        | python3 -c "
+import json, sys
+assets = json.load(sys.stdin)['assets']
+print(next(a['browser_download_url'] for a in assets
+           if a['name'].endswith('.x86_64.rpm')))
+" 2>/dev/null)"
+
+    if [[ -z "${url:-}" ]]; then
+        err "Could not find an x86_64 rpm in the latest Angry IP Scanner release"
+        return 1
+    fi
+
+    info "Installing ${url##*/}"
+    sudo dnf install -y "$url"
+}
+
+step "Install Angry IP Scanner" install_ipscan
+
+# ------------------------------------------------------ JetBrains Toolbox ---
+
+# The Flathub IDE builds trail upstream and drag in an end-of-life
+# org.freedesktop.Sdk runtime. Toolbox is JetBrains' own Linux channel: it
+# installs the IDEs itself and keeps them current.
+install_jetbrains_toolbox() {
+    local arch_key="linux"
+    [[ "$(uname -m)" == "aarch64" ]] && arch_key="linuxARM64"
+
+    local release_json link sum_link
+    release_json="$(curl -fsSL \
+        "https://data.services.jetbrains.com/products/releases?code=TBA&latest=true&type=release")" \
+        || return 1
+
+    read -r link sum_link <<<"$(printf '%s' "$release_json" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)['TBA'][0]['downloads']['$arch_key']
+print(d['link'], d['checksumLink'])
+" 2>/dev/null)"
+
+    if [[ -z "${link:-}" ]]; then
+        err "Could not read a Toolbox download URL for $arch_key from the release API"
+        return 1
+    fi
+
+    local tmp
+    tmp="$(mktemp -d)"
+    if ! curl -fL --progress-bar -o "$tmp/toolbox.tar.gz" "$link"; then
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    local want have
+    want="$(curl -fsSL "$sum_link" | awk '{print $1}')"
+    have="$(sha256sum "$tmp/toolbox.tar.gz" | awk '{print $1}')"
+    if [[ -z "$want" || "$want" != "$have" ]]; then
+        err "Toolbox checksum mismatch - expected ${want:-<none>}, got $have"
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    tar -xzf "$tmp/toolbox.tar.gz" -C "$tmp" || { rm -rf "$tmp"; return 1; }
+
+    local src
+    src="$(find "$tmp" -maxdepth 1 -type d -name 'jetbrains-toolbox-*' | head -n 1)"
+    if [[ -z "$src" ]]; then
+        err "Unexpected Toolbox archive layout"
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    mkdir -p "$TOOLBOX_DIR"
+    rm -rf "${TOOLBOX_DIR:?}"/*
+    cp -a "$src"/. "$TOOLBOX_DIR/" || { rm -rf "$tmp"; return 1; }
+    rm -rf "$tmp"
+
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$TOOLBOX_DIR/jetbrains-toolbox" "$HOME/.local/bin/jetbrains-toolbox"
+
+    local icon="applications-development"
+    [[ -f "$TOOLBOX_DIR/toolbox.svg" ]] && icon="$TOOLBOX_DIR/toolbox.svg"
+
+    mkdir -p "$HOME/.local/share/applications"
+    cat > "$HOME/.local/share/applications/jetbrains-toolbox.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=JetBrains Toolbox
+Exec=$TOOLBOX_DIR/jetbrains-toolbox
+Icon=$icon
+Terminal=false
+Categories=Development;
+DESKTOP
+    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null
+    return 0
+}
+
+step "Install JetBrains Toolbox" install_jetbrains_toolbox
+
+# Drop the old Flathub IDE builds if a previous run installed them, then let
+# flatpak garbage-collect any runtime nothing references any more.
+retire_jetbrains_flatpaks() {
+    local app
+    for app in com.jetbrains.PyCharm-Community com.jetbrains.IntelliJ-IDEA-Community; do
+        if flatpak list --app --columns=application 2>/dev/null | grep -qx "$app"; then
+            info "Removing the $app flatpak in favour of Toolbox"
+            flatpak uninstall -y "$app" || warn "Could not remove $app"
+        fi
+    done
+    flatpak uninstall --unused -y >/dev/null 2>&1
+    return 0
+}
+
+step "Retire the Flathub JetBrains IDEs and unused runtimes" \
+    retire_jetbrains_flatpaks
 
 # --------------------------------------------------------- enable the dock ---
 
@@ -327,61 +457,6 @@ REPO
 
 step "Install the Claude Code CLI (signed dnf repo)" install_claude_cli
 
-# ------------------------------------------------- Claude desktop app (opt) ---
-
-# The official desktop app is Debian/Ubuntu only - Fedora is not supported yet.
-# This runs it out of an Ubuntu distrobox container and exports the launcher to
-# the host. Unsupported by Anthropic; the CLI above is the documented path.
-install_claude_desktop() {
-    sudo dnf install -y distrobox podman || return 1
-
-    local extra_flags=""
-    if [[ -e /dev/kvm ]]; then
-        extra_flags+=" --device /dev/kvm"
-        sudo usermod -aG kvm "$USER" || warn "Could not add $USER to the kvm group"
-    else
-        warn "/dev/kvm is missing - turn on hardware virtualization in firmware for Cowork"
-    fi
-    [[ -e /dev/vhost-vsock ]] && extra_flags+=" --device /dev/vhost-vsock"
-
-    if ! distrobox list --no-color 2>/dev/null | grep -qw "$DESKTOP_BOX"; then
-        distrobox create --yes --name "$DESKTOP_BOX" --image "$DESKTOP_IMAGE" \
-            ${extra_flags:+--additional-flags "$extra_flags"} || return 1
-    fi
-
-    local inner
-    inner="$(cat <<INNER
-set -e
-export DEBIAN_FRONTEND=noninteractive
-sudo apt update
-sudo apt install -y curl gnupg
-sudo curl -fsSLo /usr/share/keyrings/claude-desktop-archive-keyring.asc \
-    https://downloads.claude.ai/claude-desktop/key.asc
-gpg --show-keys --with-colons /usr/share/keyrings/claude-desktop-archive-keyring.asc \
-    | grep -q $CLAUDE_KEY_FPR
-echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/claude-desktop-archive-keyring.asc] https://downloads.claude.ai/claude-desktop/apt/stable stable main" \
-    | sudo tee /etc/apt/sources.list.d/claude-desktop.list
-sudo apt update
-sudo apt install -y claude-desktop
-INNER
-)"
-
-    distrobox enter --name "$DESKTOP_BOX" -- bash -c "$inner" || return 1
-    distrobox enter --name "$DESKTOP_BOX" -- distrobox-export --app claude-desktop
-}
-
-if (( WITH_DESKTOP )); then
-    step "Install the Claude desktop app in an Ubuntu distrobox" install_claude_desktop
-    if (( ! DRY_RUN )); then
-        warn "Log out and back in so the kvm group takes effect, then launch Claude"
-        warn "from your app grid. Update it later with:"
-        warn "  distrobox enter --name $DESKTOP_BOX -- sudo apt update"
-        warn "  distrobox enter --name $DESKTOP_BOX -- sudo apt upgrade claude-desktop"
-    fi
-else
-    info "Skipping the Claude desktop app (pass --with-desktop to install it)"
-fi
-
 # ----------------------------------------------------------------- summary ---
 
 printf '\n\033[1;34m================ Summary ================\033[0m\n'
@@ -394,5 +469,6 @@ if (( ${#FAILED[@]} )); then
 fi
 
 printf '\nReboot (or log out and back in) so GNOME picks up Dash to Dock.\n'
+printf 'Then open JetBrains Toolbox and install PyCharm and IntelliJ IDEA from it.\n'
 (( ${#FAILED[@]} )) && exit 1
 exit 0
