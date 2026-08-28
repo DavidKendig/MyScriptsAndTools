@@ -3,9 +3,9 @@
 # FedoraRestore.sh - Rebuild a personal Fedora Workstation app set after a fresh install.
 #
 # Removes Firefox and installs: Brave, GNOME Extension Manager, Dash to Dock,
-# VLC, LibreOffice Base, PyCharm Community, IntelliJ IDEA Community, OBS Studio,
-# LM Studio, opencode, Sublime Text, Steam, Obsidian, the latest OpenJDK,
-# Python, and the Claude Code CLI.
+# VLC, LibreOffice Base, JetBrains Toolbox, OBS Studio, LM Studio, opencode,
+# Sublime Text, Steam, Obsidian, the latest OpenJDK, Python, and the
+# Claude Code CLI.
 #
 # Usage:  ./FedoraRestore.sh                  # run everything
 #         ./FedoraRestore.sh --dry-run        # print the commands without running them
@@ -46,6 +46,9 @@ CLAUDE_KEY_FPR="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
 # Ubuntu container used for the (Debian-only) Claude desktop app.
 DESKTOP_BOX="${DESKTOP_BOX:-claude-desktop}"
 DESKTOP_IMAGE="${DESKTOP_IMAGE:-ubuntu:24.04}"
+
+# JetBrains Toolbox, which manages the IDE installs itself.
+TOOLBOX_DIR="${TOOLBOX_DIR:-$HOME/.local/share/JetBrains/Toolbox/bin}"
 
 # LM Studio ships as an AppImage with a versioned URL. Override if this 404s:
 #   LMSTUDIO_URL=https://installers.lmstudio.ai/linux/x64/<version>/LM-Studio-<version>-x64.AppImage ./FedoraRestore.sh
@@ -224,14 +227,103 @@ step "Install Python (system python3 + pip, plus the newest packaged version)" \
 step "Install GNOME Extension Manager" \
     flatpak install -y --user flathub com.mattjakeman.ExtensionManager
 
-step "Install PyCharm Community" \
-    flatpak install -y --user flathub com.jetbrains.PyCharm-Community
-
-step "Install IntelliJ IDEA Community" \
-    flatpak install -y --user flathub com.jetbrains.IntelliJ-IDEA-Community
-
 step "Install Obsidian" \
     flatpak install -y --user flathub md.obsidian.Obsidian
+
+# ------------------------------------------------------ JetBrains Toolbox ---
+
+# The Flathub IDE builds trail upstream and drag in an end-of-life
+# org.freedesktop.Sdk runtime. Toolbox is JetBrains' own Linux channel: it
+# installs the IDEs itself and keeps them current.
+install_jetbrains_toolbox() {
+    local arch_key="linux"
+    [[ "$(uname -m)" == "aarch64" ]] && arch_key="linuxARM64"
+
+    local release_json link sum_link
+    release_json="$(curl -fsSL \
+        "https://data.services.jetbrains.com/products/releases?code=TBA&latest=true&type=release")" \
+        || return 1
+
+    read -r link sum_link <<<"$(printf '%s' "$release_json" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)['TBA'][0]['downloads']['$arch_key']
+print(d['link'], d['checksumLink'])
+" 2>/dev/null)"
+
+    if [[ -z "${link:-}" ]]; then
+        err "Could not read a Toolbox download URL for $arch_key from the release API"
+        return 1
+    fi
+
+    local tmp
+    tmp="$(mktemp -d)"
+    if ! curl -fL --progress-bar -o "$tmp/toolbox.tar.gz" "$link"; then
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    local want have
+    want="$(curl -fsSL "$sum_link" | awk '{print $1}')"
+    have="$(sha256sum "$tmp/toolbox.tar.gz" | awk '{print $1}')"
+    if [[ -z "$want" || "$want" != "$have" ]]; then
+        err "Toolbox checksum mismatch - expected ${want:-<none>}, got $have"
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    tar -xzf "$tmp/toolbox.tar.gz" -C "$tmp" || { rm -rf "$tmp"; return 1; }
+
+    local src
+    src="$(find "$tmp" -maxdepth 1 -type d -name 'jetbrains-toolbox-*' | head -n 1)"
+    if [[ -z "$src" ]]; then
+        err "Unexpected Toolbox archive layout"
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    mkdir -p "$TOOLBOX_DIR"
+    rm -rf "${TOOLBOX_DIR:?}"/*
+    cp -a "$src"/. "$TOOLBOX_DIR/" || { rm -rf "$tmp"; return 1; }
+    rm -rf "$tmp"
+
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$TOOLBOX_DIR/jetbrains-toolbox" "$HOME/.local/bin/jetbrains-toolbox"
+
+    local icon="applications-development"
+    [[ -f "$TOOLBOX_DIR/toolbox.svg" ]] && icon="$TOOLBOX_DIR/toolbox.svg"
+
+    mkdir -p "$HOME/.local/share/applications"
+    cat > "$HOME/.local/share/applications/jetbrains-toolbox.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=JetBrains Toolbox
+Exec=$TOOLBOX_DIR/jetbrains-toolbox
+Icon=$icon
+Terminal=false
+Categories=Development;
+DESKTOP
+    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null
+    return 0
+}
+
+step "Install JetBrains Toolbox" install_jetbrains_toolbox
+
+# Drop the old Flathub IDE builds if a previous run installed them, then let
+# flatpak garbage-collect any runtime nothing references any more.
+retire_jetbrains_flatpaks() {
+    local app
+    for app in com.jetbrains.PyCharm-Community com.jetbrains.IntelliJ-IDEA-Community; do
+        if flatpak list --app --columns=application 2>/dev/null | grep -qx "$app"; then
+            info "Removing the $app flatpak in favour of Toolbox"
+            flatpak uninstall -y "$app" || warn "Could not remove $app"
+        fi
+    done
+    flatpak uninstall --unused -y >/dev/null 2>&1
+    return 0
+}
+
+step "Retire the Flathub JetBrains IDEs and unused runtimes" \
+    retire_jetbrains_flatpaks
 
 # --------------------------------------------------------- enable the dock ---
 
@@ -394,5 +486,6 @@ if (( ${#FAILED[@]} )); then
 fi
 
 printf '\nReboot (or log out and back in) so GNOME picks up Dash to Dock.\n'
+printf 'Then open JetBrains Toolbox and install PyCharm and IntelliJ IDEA from it.\n'
 (( ${#FAILED[@]} )) && exit 1
 exit 0

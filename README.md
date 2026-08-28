@@ -33,7 +33,7 @@ A personal grab-bag of setup scripts, utilities, and reference notes for Windows
 
 | Script | What it does |
 | --- | --- |
-| `FedoraRestore.sh` | Rebuilds a personal Fedora app set: removes Firefox, installs Brave, VLC, OBS, Steam, Obsidian, JetBrains IDEs, OpenJDK, Python, the Claude Code CLI, and more. `--with-desktop` adds the Claude desktop app in a distrobox. |
+| `FedoraRestore.sh` | Rebuilds a personal Fedora app set: removes Firefox, installs Brave, VLC, OBS, Steam, Obsidian, JetBrains Toolbox, OpenJDK, Python, the Claude Code CLI, and more. `--with-desktop` adds the Claude desktop app in a distrobox. |
 | `install_comfyui_manjaro.sh` | Installs NVIDIA drivers, Python, and ComfyUI on Manjaro. |
 | `archComCMD.sh` | Menu for Arch updates and MongoDB start/dump/restore. |
 | `DarkSiteArch.sh` | Menu for Tor + nginx hidden-service setup on Arch. |
