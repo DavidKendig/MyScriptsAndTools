@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 #
-# FedoraRestore.sh - Rebuild a personal Fedora Workstation app set after a fresh install.
+# FedoraRestore.sh - Set up the GNOME desktop on a fresh Fedora Workstation.
 #
-# Removes Firefox and installs: Brave, GNOME Extension Manager, Dash to Dock,
-# VLC, LibreOffice Base, JetBrains Toolbox, OBS Studio, LM Studio, opencode,
-# Sublime Text, Steam, Obsidian, HexChat, PuTTY, nomacs, Bottles,
-# Angry IP Scanner, the latest OpenJDK, Python, and the Claude Code CLI.
+# Removes Firefox, enables RPM Fusion, installs Brave, ffmpeg, Node.js,
+# browser_cookie3, ProtonVPN, GNOME Tweaks, and the Dash to Dock and
+# AppIndicator extensions, then enables them.
 #
 # Usage:  ./FedoraRestore.sh            # run everything
 #         ./FedoraRestore.sh --dry-run  # print the commands without running them
@@ -34,18 +33,6 @@ done
 
 SUCCEEDED=()
 FAILED=()
-
-# Anthropic's release signing key for the Claude Code rpm repo.
-# Verify at https://code.claude.com/docs/en/setup
-CLAUDE_KEY_FPR="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
-
-# JetBrains Toolbox, which manages the IDE installs itself.
-TOOLBOX_DIR="${TOOLBOX_DIR:-$HOME/.local/share/JetBrains/Toolbox/bin}"
-
-# LM Studio ships as an AppImage with a versioned URL. Override if this 404s:
-#   LMSTUDIO_URL=https://installers.lmstudio.ai/linux/x64/<version>/LM-Studio-<version>-x64.AppImage ./FedoraRestore.sh
-LMSTUDIO_URL="${LMSTUDIO_URL:-https://installers.lmstudio.ai/linux/x64/0.3.30-2/LM-Studio-0.3.30-2-x64.AppImage}"
-LMSTUDIO_DIR="${LMSTUDIO_DIR:-$HOME/Applications}"
 
 # ---------------------------------------------------------------- helpers ---
 
@@ -77,20 +64,10 @@ step() {
 have()      { command -v "$1" >/dev/null 2>&1; }
 installed() { rpm -q "$1" >/dev/null 2>&1; }
 
-# dnf5 (Fedora 41+) and dnf4 spell repo management differently.
-add_repo() {
-    local repo_url="$1"
-    if dnf config-manager --help 2>&1 | grep -q 'addrepo'; then
-        sudo dnf config-manager addrepo --overwrite --from-repofile="$repo_url"
-    else
-        sudo dnf config-manager --add-repo "$repo_url"
-    fi
-}
-
 # ------------------------------------------------------------ sanity check ---
 
 if [[ $EUID -eq 0 ]]; then
-    err "Run this as your normal user, not root - flatpak and opencode install per-user."
+    err "Run this as your normal user, not root - the extension is enabled per-user."
     exit 1
 fi
 
@@ -101,29 +78,12 @@ fi
 
 FEDORA_VER="$(rpm -E %fedora)"
 info "Fedora $FEDORA_VER detected"
-(( DRY_RUN )) && warn "Dry run - nothing will actually be installed."
+(( DRY_RUN )) && warn "Dry run - nothing will actually be changed."
 
 if ! sudo -v; then
     err "sudo authentication failed."
     exit 1
 fi
-
-# ------------------------------------------------------------ base plumbing ---
-
-step "Update installed packages" \
-    sudo dnf upgrade --refresh -y
-
-step "Install core tooling (dnf-plugins-core, curl, gnupg, flatpak, fuse)" \
-    sudo dnf install -y dnf-plugins-core curl gnupg2 flatpak fuse fuse-libs
-
-step "Enable RPM Fusion free + nonfree (needed for VLC, OBS, Steam)" \
-    sudo dnf install -y \
-        "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA_VER}.noarch.rpm" \
-        "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${FEDORA_VER}.noarch.rpm"
-
-step "Add the Flathub remote" \
-    flatpak remote-add --if-not-exists --user \
-        flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
 # ----------------------------------------------------------- remove Firefox ---
 
@@ -144,12 +104,36 @@ else
 fi
 
 # The Flatpak build, if that one is present too.
-if (( ! DRY_RUN )) && flatpak list --app 2>/dev/null | grep -q 'org.mozilla.firefox'; then
+if (( ! DRY_RUN )) && have flatpak \
+   && flatpak list --app 2>/dev/null | grep -q 'org.mozilla.firefox'; then
     step "Remove the Firefox flatpak" \
         flatpak uninstall -y org.mozilla.firefox
 fi
 
-# ------------------------------------------------------------- dnf packages ---
+# -------------------------------------------------------------- RPM Fusion ---
+
+# The third-party repos Fedora can't ship itself: free carries the full ffmpeg
+# and other codec-dependent packages, nonfree carries the proprietary ones
+# (NVIDIA drivers, Steam, and friends).
+step "Enable RPM Fusion free + nonfree" \
+    sudo dnf install -y \
+        "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA_VER}.noarch.rpm" \
+        "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${FEDORA_VER}.noarch.rpm"
+
+# ------------------------------------------------------------------- Brave ---
+
+# dnf5 (Fedora 41+) and dnf4 spell repo management differently.
+add_repo() {
+    local repo_url="$1"
+    if dnf config-manager --help 2>&1 | grep -q 'addrepo'; then
+        sudo dnf config-manager addrepo --overwrite --from-repofile="$repo_url"
+    else
+        sudo dnf config-manager --add-repo "$repo_url"
+    fi
+}
+
+step "Install dnf-plugins-core (provides dnf config-manager)" \
+    sudo dnf install -y dnf-plugins-core
 
 step "Add the Brave browser repo" \
     add_repo "https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo"
@@ -157,305 +141,127 @@ step "Add the Brave browser repo" \
 step "Install Brave" \
     sudo dnf install -y brave-browser
 
-step "Add the Sublime Text signing key" \
-    sudo rpm -v --import https://download.sublimetext.com/sublimehq-rpm-pub.gpg
+# ------------------------------------------------------------------ ffmpeg ---
 
-step "Add the Sublime Text repo" \
-    add_repo "https://download.sublimetext.com/rpm/stable/x86_64/sublime-text.repo"
+# Fedora's own repos only carry ffmpeg-free, which is built without the
+# patent-encumbered codecs. The full build comes from RPM Fusion free, and
+# --allowerasing lets it replace ffmpeg-free rather than conflict with it.
+install_ffmpeg() {
+    if sudo dnf install -y --allowerasing ffmpeg; then
+        return 0
+    fi
+    warn "Full ffmpeg unavailable - falling back to Fedora's ffmpeg-free"
+    sudo dnf install -y ffmpeg-free
+}
 
-step "Install Sublime Text" \
-    sudo dnf install -y sublime-text
+step "Install ffmpeg" install_ffmpeg
 
-step "Install VLC (RPM Fusion)" \
-    sudo dnf install -y vlc
+# ----------------------------------------------------------------- Node.js ---
 
-step "Install OBS Studio (RPM Fusion)" \
-    sudo dnf install -y obs-studio
+# Fedora's nodejs package tracks whichever LTS the release shipped with. To pin
+# a different major instead, install the versioned package (nodejs22, nodejs20,
+# ...) - dnf swaps the default out for it.
+install_node() {
+    sudo dnf install -y nodejs npm || return 1
+    have node && info "node $(node --version), npm $(npm --version)"
+    return 0
+}
 
-step "Install Steam (RPM Fusion nonfree)" \
-    sudo dnf install -y steam
+step "Install Node.js and npm" install_node
 
-step "Install LibreOffice Base" \
-    sudo dnf install -y libreoffice-base
+# ---------------------------------------------------------- browser_cookie3 ---
 
-step "Install nomacs" \
-    sudo dnf install -y nomacs
+# Python library that reads cookies out of installed browsers. Its Chrome/Brave
+# path decrypts through the Secret Service, so python3-secretstorage comes from
+# dnf rather than pip.
+install_browser_cookie3() {
+    sudo dnf install -y python3-pip python3-secretstorage || return 1
 
-step "Install PuTTY" \
-    sudo dnf install -y putty
+    # Fedora marks the system interpreter externally managed (PEP 668), so a
+    # plain --user install is refused; retry with the documented escape hatch.
+    if pip3 install --user browser-cookie3; then
+        return 0
+    fi
+    warn "pip refused a --user install (PEP 668) - retrying with --break-system-packages"
+    pip3 install --user --break-system-packages browser-cookie3
+}
 
-# Upstream HexChat development stopped in 2024; Fedora still ships the package.
-step "Install HexChat" \
-    sudo dnf install -y hexchat
+step "Install browser_cookie3" install_browser_cookie3
+
+# -------------------------------------------------------------- ProtonVPN ---
+
+# Proton publishes a per-release repo; the release rpm just drops the repo file
+# and its signing key in place. Bump this if Proton ships a newer one:
+#   PROTONVPN_RELEASE=1.0.5-1 ./FedoraRestore.sh
+PROTONVPN_RELEASE="${PROTONVPN_RELEASE:-1.0.4-1}"
+
+install_protonvpn() {
+    local rpm="protonvpn-stable-release-${PROTONVPN_RELEASE}.noarch.rpm"
+    local url="https://repo.protonvpn.com/fedora-${FEDORA_VER}-stable/protonvpn-stable-release/${rpm}"
+
+    local tmp
+    tmp="$(mktemp -d)"
+    if ! curl -fL --progress-bar -o "$tmp/$rpm" "$url"; then
+        err "Could not download $rpm - Proton may not publish a repo for Fedora $FEDORA_VER yet"
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    if ! sudo dnf install -y "$tmp/$rpm"; then
+        rm -rf "$tmp"
+        return 1
+    fi
+    rm -rf "$tmp"
+
+    # check-update exits 100 when updates are available, which is not an error.
+    sudo dnf check-update --refresh || true
+
+    sudo dnf install -y proton-vpn-gnome-desktop
+}
+
+step "Install ProtonVPN" install_protonvpn
+
+# The Proton client puts its status in the system tray, which GNOME only shows
+# with the AppIndicator extension.
+step "Install the AppIndicator tray support ProtonVPN needs" \
+    sudo dnf install -y libappindicator-gtk3 gnome-shell-extension-appindicator \
+        gnome-extensions-app
+
+# --------------------------------------------------------- GNOME packages ---
+
+step "Install GNOME Tweaks" \
+    sudo dnf install -y gnome-tweaks
 
 step "Install the Dash to Dock GNOME extension" \
     sudo dnf install -y gnome-shell-extension-dash-to-dock
 
-# ------------------------------------------------------------- toolchains ---
+# ----------------------------------------------------- enable the extensions ---
 
-# java-latest-openjdk tracks the newest JDK Fedora packages; fall back to the
-# distro default if that package name isn't in the repos.
-install_jdk() {
-    if sudo dnf install -y java-latest-openjdk java-latest-openjdk-devel; then
-        return 0
-    fi
-    warn "java-latest-openjdk unavailable - falling back to java-openjdk"
-    sudo dnf install -y java-openjdk java-openjdk-devel
-}
+# uuid|label
+EXTENSIONS=(
+    "dash-to-dock@micxgx.gmail.com|Dash to Dock"
+    "appindicatorsupport@rgcjonas.gmail.com|AppIndicator tray icons"
+)
 
-step "Install the latest OpenJDK" install_jdk
+for entry in "${EXTENSIONS[@]}"; do
+    uuid="${entry%%|*}"
+    label="${entry##*|}"
 
-# Fedora's python3 is the system interpreter; a python3.NN package installs
-# alongside it without touching /usr/bin/python3, so both are safe to have.
-install_python() {
-    sudo dnf install -y python3 python3-pip python3-devel || return 1
-
-    local newest
-    newest="$(dnf -q repoquery --qf '%{name}\n' 'python3.*' 2>/dev/null \
-        | grep -E '^python3\.[0-9]+$' | sort -V | tail -n 1)"
-
-    if [[ -n "$newest" && "$newest" != "$(python3 -c 'import sys; print("python3.%d" % sys.version_info[1])' 2>/dev/null)" ]]; then
-        info "Newest packaged interpreter is $newest - installing it alongside python3"
-        sudo dnf install -y "$newest" || warn "Could not install $newest"
-    fi
-    return 0
-}
-
-step "Install Python (system python3 + pip, plus the newest packaged version)" \
-    install_python
-
-# ---------------------------------------------------------------- flatpaks ---
-
-step "Install GNOME Extension Manager" \
-    flatpak install -y --user flathub com.mattjakeman.ExtensionManager
-
-step "Install Obsidian" \
-    flatpak install -y --user flathub md.obsidian.Obsidian
-
-# Bottles ships as a flatpak only - upstream doesn't support other packaging,
-# and there is no bottles rpm in the Fedora repos.
-step "Install Bottles" \
-    flatpak install -y --user flathub com.usebottles.bottles
-
-# --------------------------------------------------------- Angry IP Scanner ---
-
-# Distributed as an rpm on GitHub releases (x86_64 only); needs a JRE, which
-# the OpenJDK step above provides.
-install_ipscan() {
-    if [[ "$(uname -m)" != "x86_64" ]]; then
-        warn "Angry IP Scanner publishes an rpm for x86_64 only - skipping on $(uname -m)"
-        warn "Use the ipscan-any jar from https://github.com/angryip/ipscan/releases instead"
-        return 0
-    fi
-
-    local url
-    url="$(curl -fsSL https://api.github.com/repos/angryip/ipscan/releases/latest \
-        | python3 -c "
-import json, sys
-assets = json.load(sys.stdin)['assets']
-print(next(a['browser_download_url'] for a in assets
-           if a['name'].endswith('.x86_64.rpm')))
-" 2>/dev/null)"
-
-    if [[ -z "${url:-}" ]]; then
-        err "Could not find an x86_64 rpm in the latest Angry IP Scanner release"
-        return 1
-    fi
-
-    info "Installing ${url##*/}"
-    sudo dnf install -y "$url"
-}
-
-step "Install Angry IP Scanner" install_ipscan
-
-# ------------------------------------------------------ JetBrains Toolbox ---
-
-# The Flathub IDE builds trail upstream and drag in an end-of-life
-# org.freedesktop.Sdk runtime. Toolbox is JetBrains' own Linux channel: it
-# installs the IDEs itself and keeps them current.
-install_jetbrains_toolbox() {
-    local arch_key="linux"
-    [[ "$(uname -m)" == "aarch64" ]] && arch_key="linuxARM64"
-
-    local release_json link sum_link
-    release_json="$(curl -fsSL \
-        "https://data.services.jetbrains.com/products/releases?code=TBA&latest=true&type=release")" \
-        || return 1
-
-    read -r link sum_link <<<"$(printf '%s' "$release_json" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)['TBA'][0]['downloads']['$arch_key']
-print(d['link'], d['checksumLink'])
-" 2>/dev/null)"
-
-    if [[ -z "${link:-}" ]]; then
-        err "Could not read a Toolbox download URL for $arch_key from the release API"
-        return 1
-    fi
-
-    local tmp
-    tmp="$(mktemp -d)"
-    if ! curl -fL --progress-bar -o "$tmp/toolbox.tar.gz" "$link"; then
-        rm -rf "$tmp"
-        return 1
-    fi
-
-    local want have
-    want="$(curl -fsSL "$sum_link" | awk '{print $1}')"
-    have="$(sha256sum "$tmp/toolbox.tar.gz" | awk '{print $1}')"
-    if [[ -z "$want" || "$want" != "$have" ]]; then
-        err "Toolbox checksum mismatch - expected ${want:-<none>}, got $have"
-        rm -rf "$tmp"
-        return 1
-    fi
-
-    tar -xzf "$tmp/toolbox.tar.gz" -C "$tmp" || { rm -rf "$tmp"; return 1; }
-
-    local src
-    src="$(find "$tmp" -maxdepth 1 -type d -name 'jetbrains-toolbox-*' | head -n 1)"
-    if [[ -z "$src" ]]; then
-        err "Unexpected Toolbox archive layout"
-        rm -rf "$tmp"
-        return 1
-    fi
-
-    mkdir -p "$TOOLBOX_DIR"
-    rm -rf "${TOOLBOX_DIR:?}"/*
-    cp -a "$src"/. "$TOOLBOX_DIR/" || { rm -rf "$tmp"; return 1; }
-    rm -rf "$tmp"
-
-    mkdir -p "$HOME/.local/bin"
-    ln -sf "$TOOLBOX_DIR/jetbrains-toolbox" "$HOME/.local/bin/jetbrains-toolbox"
-
-    local icon="applications-development"
-    [[ -f "$TOOLBOX_DIR/toolbox.svg" ]] && icon="$TOOLBOX_DIR/toolbox.svg"
-
-    mkdir -p "$HOME/.local/share/applications"
-    cat > "$HOME/.local/share/applications/jetbrains-toolbox.desktop" <<DESKTOP
-[Desktop Entry]
-Type=Application
-Name=JetBrains Toolbox
-Exec=$TOOLBOX_DIR/jetbrains-toolbox
-Icon=$icon
-Terminal=false
-Categories=Development;
-DESKTOP
-    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null
-    return 0
-}
-
-step "Install JetBrains Toolbox" install_jetbrains_toolbox
-
-# Drop the old Flathub IDE builds if a previous run installed them, then let
-# flatpak garbage-collect any runtime nothing references any more.
-retire_jetbrains_flatpaks() {
-    local app
-    for app in com.jetbrains.PyCharm-Community com.jetbrains.IntelliJ-IDEA-Community; do
-        if flatpak list --app --columns=application 2>/dev/null | grep -qx "$app"; then
-            info "Removing the $app flatpak in favour of Toolbox"
-            flatpak uninstall -y "$app" || warn "Could not remove $app"
+    info "Enable $label"
+    if (( DRY_RUN )); then
+        printf '    (dry-run) gnome-extensions enable %s\n' "$uuid"
+        SUCCEEDED+=("Enable $label")
+    elif have gnome-extensions && [[ -n "${XDG_CURRENT_DESKTOP:-}" ]]; then
+        if gnome-extensions enable "$uuid" 2>/dev/null; then
+            SUCCEEDED+=("Enable $label")
+        else
+            warn "Could not enable it yet - log out and back in, then run:"
+            warn "  gnome-extensions enable $uuid"
         fi
-    done
-    flatpak uninstall --unused -y >/dev/null 2>&1
-    return 0
-}
-
-step "Retire the Flathub JetBrains IDEs and unused runtimes" \
-    retire_jetbrains_flatpaks
-
-# --------------------------------------------------------- enable the dock ---
-
-info "Enable Dash to Dock"
-if (( DRY_RUN )); then
-    printf '    (dry-run) gnome-extensions enable dash-to-dock@micxgx.gmail.com\n'
-elif have gnome-extensions && [[ -n "${XDG_CURRENT_DESKTOP:-}" ]]; then
-    if gnome-extensions enable dash-to-dock@micxgx.gmail.com 2>/dev/null; then
-        SUCCEEDED+=("Enable Dash to Dock")
     else
-        warn "Could not enable it yet - log out and back in, then run:"
-        warn "  gnome-extensions enable dash-to-dock@micxgx.gmail.com"
+        warn "No GNOME session here. After rebooting, turn $label on in the Extensions app."
     fi
-else
-    warn "No GNOME session here. After rebooting, turn it on in Extension Manager."
-fi
-
-# --------------------------------------------------------------- LM Studio ---
-
-info "Install LM Studio (AppImage)"
-if (( DRY_RUN )); then
-    printf '    (dry-run) curl -fL -o %s/LM-Studio.AppImage %s\n' "$LMSTUDIO_DIR" "$LMSTUDIO_URL"
-else
-    mkdir -p "$LMSTUDIO_DIR"
-    if curl -fL --progress-bar -o "$LMSTUDIO_DIR/LM-Studio.AppImage" "$LMSTUDIO_URL"; then
-        chmod +x "$LMSTUDIO_DIR/LM-Studio.AppImage"
-        mkdir -p "$HOME/.local/share/applications"
-        cat > "$HOME/.local/share/applications/lm-studio.desktop" <<DESKTOP
-[Desktop Entry]
-Type=Application
-Name=LM Studio
-Exec=$LMSTUDIO_DIR/LM-Studio.AppImage %U
-Icon=applications-science
-Terminal=false
-Categories=Development;Utility;
-DESKTOP
-        update-desktop-database "$HOME/.local/share/applications" 2>/dev/null
-        SUCCEEDED+=("Install LM Studio")
-    else
-        err "Install LM Studio"
-        FAILED+=("Install LM Studio")
-        warn "The pinned AppImage URL may be stale. Grab the current link from"
-        warn "https://lmstudio.ai/download and re-run with LMSTUDIO_URL=<url>"
-    fi
-fi
-
-# ---------------------------------------------------------------- opencode ---
-
-# Vendor install script from opencode.ai; drops the binary in ~/.opencode/bin.
-info "Install opencode"
-if (( DRY_RUN )); then
-    printf '    (dry-run) curl -fsSL https://opencode.ai/install | bash\n'
-elif curl -fsSL https://opencode.ai/install | bash; then
-    SUCCEEDED+=("Install opencode")
-    case ":$PATH:" in
-        *":$HOME/.opencode/bin:"*) ;;
-        *) warn "Add to your shell profile: export PATH=\"\$HOME/.opencode/bin:\$PATH\"" ;;
-    esac
-else
-    err "Install opencode"
-    FAILED+=("Install opencode")
-fi
-
-# -------------------------------------------------------- Claude Code CLI ---
-
-# Anthropic publishes a signed rpm repo for Fedora/RHEL.
-install_claude_cli() {
-    local key_tmp
-    key_tmp="$(mktemp)"
-    if ! curl -fsSL https://downloads.claude.ai/keys/claude-code.asc -o "$key_tmp"; then
-        rm -f "$key_tmp"
-        return 1
-    fi
-    if ! gpg --show-keys --with-colons "$key_tmp" | grep -q "$CLAUDE_KEY_FPR"; then
-        err "Signing key fingerprint does not match $CLAUDE_KEY_FPR - refusing to import"
-        rm -f "$key_tmp"
-        return 1
-    fi
-    sudo rpm --import "$key_tmp" || { rm -f "$key_tmp"; return 1; }
-    rm -f "$key_tmp"
-
-    sudo tee /etc/yum.repos.d/claude-code.repo >/dev/null <<'REPO'
-[claude-code]
-name=Claude Code
-baseurl=https://downloads.claude.ai/claude-code/rpm/stable
-enabled=1
-gpgcheck=1
-gpgkey=https://downloads.claude.ai/keys/claude-code.asc
-REPO
-
-    sudo dnf install -y claude-code
-}
-
-step "Install the Claude Code CLI (signed dnf repo)" install_claude_cli
+done
 
 # ----------------------------------------------------------------- summary ---
 
@@ -468,7 +274,6 @@ if (( ${#FAILED[@]} )); then
     for item in "${FAILED[@]}"; do printf '  - %s\n' "$item"; done
 fi
 
-printf '\nReboot (or log out and back in) so GNOME picks up Dash to Dock.\n'
-printf 'Then open JetBrains Toolbox and install PyCharm and IntelliJ IDEA from it.\n'
+printf '\nReboot (or log out and back in) so GNOME picks up the new extensions.\n'
 (( ${#FAILED[@]} )) && exit 1
 exit 0

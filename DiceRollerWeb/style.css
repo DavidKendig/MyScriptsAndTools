@@ -1,0 +1,471 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 20px;
+    color: #333;
+}
+
+.container {
+    max-width: 900px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+}
+
+header {
+    background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+    color: white;
+    padding: 30px;
+    text-align: center;
+}
+
+header h1 {
+    font-size: 2.5em;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.tab-navigation {
+    display: flex;
+    background: #34495e;
+    border-bottom: 3px solid #667eea;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 15px 20px;
+    border: none;
+    background: transparent;
+    color: #ecf0f1;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -3px;
+}
+
+.tab-btn:hover {
+    background: rgba(102, 126, 234, 0.2);
+}
+
+.tab-btn.active {
+    background: rgba(102, 126, 234, 0.3);
+    border-bottom-color: #667eea;
+    color: white;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+main {
+    padding: 30px;
+}
+
+section {
+    margin-bottom: 30px;
+}
+
+h2 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #667eea;
+    font-size: 1.5em;
+}
+
+.dice-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.dice-row {
+    display: grid;
+    grid-template-columns: 80px 1fr 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.dice-row:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.die-label {
+    font-size: 1.3em;
+    font-weight: bold;
+    color: #667eea;
+}
+
+.input-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.input-group label {
+    font-weight: 500;
+    color: #555;
+    min-width: 65px;
+}
+
+.input-group input {
+    width: 80px;
+    padding: 8px;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    font-size: 1em;
+    text-align: center;
+    transition: border-color 0.3s;
+}
+
+.input-group input:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.btn-roll {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    min-width: 100px;
+}
+
+.btn-roll:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.btn-roll:active {
+    transform: scale(0.95);
+}
+
+.advantage-section {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+}
+
+.advantage-buttons {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.btn-advantage {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
+    padding: 15px 30px;
+}
+
+.btn-advantage:hover {
+    box-shadow: 0 6px 20px rgba(56, 239, 125, 0.4);
+    transform: scale(1.05);
+}
+
+.btn-disadvantage {
+    background: linear-gradient(135deg, #ee0979 0%, #ff6a00 100%);
+    color: white;
+    padding: 15px 30px;
+}
+
+.btn-disadvantage:hover {
+    box-shadow: 0 6px 20px rgba(238, 9, 121, 0.4);
+    transform: scale(1.05);
+}
+
+.results-section {
+    background: #2c3e50;
+    color: white;
+    padding: 20px;
+    border-radius: 8px;
+}
+
+.results-section h2 {
+    color: white;
+    border-bottom-color: #667eea;
+}
+
+.results-container {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+#resultsArea {
+    width: 100%;
+    min-height: 250px;
+    padding: 15px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.95em;
+    background: #34495e;
+    color: #ecf0f1;
+    border: 2px solid #667eea;
+    border-radius: 6px;
+    resize: vertical;
+    line-height: 1.6;
+}
+
+#resultsArea::-webkit-scrollbar {
+    width: 10px;
+}
+
+#resultsArea::-webkit-scrollbar-track {
+    background: #2c3e50;
+    border-radius: 6px;
+}
+
+#resultsArea::-webkit-scrollbar-thumb {
+    background: #667eea;
+    border-radius: 6px;
+}
+
+#resultsArea::-webkit-scrollbar-thumb:hover {
+    background: #764ba2;
+}
+
+.btn-clear {
+    background: #e74c3c;
+    color: white;
+    align-self: flex-end;
+}
+
+.btn-clear:hover {
+    background: #c0392b;
+    transform: scale(1.05);
+}
+
+/* SR4+ Dice Roller Styles */
+.sr4-dice-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
+    padding: 10px;
+}
+
+.sr4-dice-btn {
+    padding: 20px;
+    font-size: 1.5em;
+    font-weight: bold;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.sr4-dice-btn:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.sr4-dice-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.sr4-stats-section {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 30px;
+}
+
+.sr4-counters {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    flex-wrap: wrap;
+}
+
+.counter {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 15px 30px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.counter-label {
+    font-size: 1.3em;
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.counter-value {
+    font-size: 2em;
+    font-weight: bold;
+    min-width: 60px;
+    text-align: center;
+    padding: 5px 15px;
+    border-radius: 6px;
+}
+
+.misses-counter .counter-value {
+    background: linear-gradient(135deg, #ee0979 0%, #ff6a00 100%);
+    color: white;
+}
+
+.hits-counter .counter-value {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
+}
+
+#sr4ResultsArea {
+    width: 100%;
+    min-height: 250px;
+    padding: 15px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.95em;
+    background: #34495e;
+    color: #ecf0f1;
+    border: 2px solid #667eea;
+    border-radius: 6px;
+    resize: vertical;
+    line-height: 1.6;
+}
+
+#sr4ResultsArea::-webkit-scrollbar {
+    width: 10px;
+}
+
+#sr4ResultsArea::-webkit-scrollbar-track {
+    background: #2c3e50;
+    border-radius: 6px;
+}
+
+#sr4ResultsArea::-webkit-scrollbar-thumb {
+    background: #667eea;
+    border-radius: 6px;
+}
+
+#sr4ResultsArea::-webkit-scrollbar-thumb:hover {
+    background: #764ba2;
+}
+
+footer {
+    background: #2c3e50;
+    color: white;
+    text-align: center;
+    padding: 20px;
+    font-size: 0.9em;
+}
+
+@media (max-width: 768px) {
+    .dice-row {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+
+    .die-label {
+        text-align: center;
+    }
+
+    .input-group {
+        justify-content: center;
+    }
+
+    .btn-roll {
+        width: 100%;
+    }
+
+    .advantage-buttons {
+        flex-direction: column;
+    }
+
+    .btn-advantage,
+    .btn-disadvantage {
+        width: 100%;
+    }
+
+    header h1 {
+        font-size: 2em;
+    }
+
+    .sr4-dice-grid {
+        grid-template-columns: repeat(5, 1fr);
+    }
+
+    .tab-btn {
+        font-size: 0.9em;
+        padding: 12px 15px;
+    }
+}
+
+@media (max-width: 480px) {
+    body {
+        padding: 10px;
+    }
+
+    main {
+        padding: 20px;
+    }
+
+    header {
+        padding: 20px;
+    }
+
+    header h1 {
+        font-size: 1.8em;
+    }
+
+    .sr4-dice-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .tab-btn {
+        font-size: 0.8em;
+        padding: 10px 8px;
+    }
+
+    .sr4-counters {
+        gap: 20px;
+    }
+
+    .counter {
+        padding: 10px 20px;
+    }
+
+    .counter-label {
+        font-size: 1.1em;
+    }
+
+    .counter-value {
+        font-size: 1.5em;
+        min-width: 40px;
+    }
+}

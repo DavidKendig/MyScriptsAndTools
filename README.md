@@ -33,7 +33,7 @@ A personal grab-bag of setup scripts, utilities, and reference notes for Windows
 
 | Script | What it does |
 | --- | --- |
-| `FedoraRestore.sh` | Rebuilds a personal Fedora app set: removes Firefox, installs Brave, VLC, OBS, Steam, Obsidian, Bottles, HexChat, PuTTY, nomacs, Angry IP Scanner, JetBrains Toolbox, OpenJDK, Python, the Claude Code CLI, and more. |
+| `FedoraRestore.sh` | Sets up a fresh Fedora Workstation: removes Firefox, enables RPM Fusion, installs Brave, ffmpeg, Node.js, browser_cookie3, ProtonVPN, GNOME Tweaks, and the Dash to Dock + AppIndicator extensions, then enables them. |
 | `install_comfyui_manjaro.sh` | Installs NVIDIA drivers, Python, and ComfyUI on Manjaro. |
 | `archComCMD.sh` | Menu for Arch updates and MongoDB start/dump/restore. |
 | `DarkSiteArch.sh` | Menu for Tor + nginx hidden-service setup on Arch. |

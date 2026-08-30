@@ -42,9 +42,8 @@ class CancelledError(Exception):
     """Raised when a conversion job is cancelled by the user."""
 
 
-DEFAULT_MODEL     = "gemma4"
-DEFAULT_OLLAMA    = "http://localhost:11434"
-DEFAULT_LM_STUDIO = "http://localhost:1234"
+DEFAULT_MODEL  = "gemma4"
+DEFAULT_OLLAMA = "http://localhost:11434"
 PAGE_ZOOM      = 2.0      # render scale for vision mode (144 dpi effective)
 
 # chars-per-page below this triggers automatic vision fallback
@@ -859,58 +858,6 @@ def column_order_score(snippets: list[str], output: str) -> tuple[float, int, in
 
 
 # ---------------------------------------------------------------------------
-# LM Studio detection
-# ---------------------------------------------------------------------------
-
-def detect_lm_studio_models(url: str = DEFAULT_LM_STUDIO,
-                            timeout: float = 2.0) -> list[str]:
-    """
-    Query LM Studio's native REST API for loaded models.
-
-    Returns a list of model IDs currently loaded in memory (state == "loaded").
-    Returns an empty list if LM Studio is not running, not reachable, or has
-    no loaded models. Never raises — caller can treat empty list as "use
-    Ollama instead".
-    """
-    try:
-        r = requests.get(f"{url.rstrip('/')}/api/v0/models", timeout=timeout)
-        if r.status_code != 200:
-            return []
-        data = r.json().get("data", [])
-        loaded: list[str] = []
-        for item in data:
-            mid = item.get("id")
-            state = item.get("state", "")
-            if mid and state == "loaded":
-                loaded.append(mid)
-        return loaded
-    except Exception:
-        return []
-
-
-_LM_STUDIO_URL_CACHE: dict[str, bool] = {}
-
-
-def is_lm_studio_url(url: str) -> bool:
-    """
-    Heuristic: does this URL point to an LM Studio server?
-
-    Checks for the LM Studio-specific /api/v0/models endpoint (Ollama does
-    not expose this path). Cached per URL to avoid repeated probes.
-    """
-    cached = _LM_STUDIO_URL_CACHE.get(url)
-    if cached is not None:
-        return cached
-    try:
-        r = requests.get(f"{url.rstrip('/')}/api/v0/models", timeout=2.0)
-        result = r.status_code == 200
-    except Exception:
-        result = False
-    _LM_STUDIO_URL_CACHE[url] = result
-    return result
-
-
-# ---------------------------------------------------------------------------
 # Ollama API
 # ---------------------------------------------------------------------------
 
@@ -1026,132 +973,6 @@ def _post_streaming(
     raise RuntimeError(f"Ollama request failed: {last_err}")
 
 
-# ---------------------------------------------------------------------------
-# LM Studio / OpenAI-compatible API
-# ---------------------------------------------------------------------------
-
-def _post_streaming_openai(
-    base_url:     str,
-    model:        str,
-    system_prompt:str,
-    user_prompt:  str,
-    b64_image:    str | None,
-    read_timeout: float,
-    cancel_event: threading.Event | None = None,
-    num_ctx:      int = NUM_CTX,
-) -> str:
-    """
-    Stream a response from an OpenAI-compatible /v1/chat/completions endpoint
-    (used by LM Studio). Vision messages are sent using the OpenAI multi-part
-    content format with a data: URL.
-    """
-    user_content: list[dict] = [{"type": "text", "text": user_prompt}]
-    if b64_image is not None:
-        user_content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/png;base64,{b64_image}"},
-        })
-
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_content},
-        ],
-        "stream":     True,
-        "max_tokens": NUM_PREDICT,
-    }
-
-    last_err: Exception | None = None
-    for attempt in range(1, MAX_RETRIES + 2):
-        try:
-            with requests.post(
-                f"{base_url.rstrip('/')}/v1/chat/completions",
-                json=payload,
-                stream=True,
-                timeout=(CONNECT_TIMEOUT, read_timeout),
-            ) as resp:
-                if resp.status_code != 200:
-                    try:
-                        body = resp.json().get("error", resp.text)
-                    except Exception:
-                        body = resp.text
-                    raise RuntimeError(f"LM Studio error {resp.status_code}: {body}")
-
-                pieces: list[str] = []
-                chunk_count = 0
-                for raw_line in resp.iter_lines(decode_unicode=True):
-                    if cancel_event is not None and cancel_event.is_set():
-                        raise CancelledError("Conversion cancelled by user.")
-                    if not raw_line:
-                        continue
-                    # OpenAI SSE: lines look like "data: {json}" or "data: [DONE]".
-                    if raw_line.startswith("data: "):
-                        raw_line = raw_line[6:]
-                    if raw_line.strip() == "[DONE]":
-                        break
-                    try:
-                        obj = json.loads(raw_line)
-                    except json.JSONDecodeError:
-                        continue
-
-                    if "error" in obj:
-                        err = obj["error"]
-                        msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-                        raise RuntimeError(f"LM Studio error: {msg}")
-
-                    choices = obj.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta") or {}
-                    piece = delta.get("content", "")
-                    if piece:
-                        pieces.append(piece)
-                        chunk_count += 1
-                        if chunk_count % 20 == 0:
-                            print(".", end="", flush=True)
-
-                    if choices[0].get("finish_reason"):
-                        break
-
-                result = "".join(pieces)
-                if not result.strip():
-                    raise RuntimeError(
-                        "LM Studio returned an empty response. The loaded "
-                        "model may not support images, or may have hit its "
-                        "context limit. Try a multimodal model in LM Studio."
-                    )
-                return result
-
-        except CancelledError:
-            raise
-        except (requests.ConnectionError, requests.Timeout) as exc:
-            last_err = exc
-            if attempt <= MAX_RETRIES:
-                wait = 2 ** attempt
-                print(f"\n  network issue ({exc.__class__.__name__}); "
-                      f"retry {attempt}/{MAX_RETRIES} in {wait}s...",
-                      flush=True)
-                time.sleep(wait)
-                continue
-            if isinstance(exc, requests.ConnectionError):
-                raise RuntimeError(
-                    f"Cannot connect to LM Studio at {base_url}. "
-                    "Make sure LM Studio is running and the local server is started."
-                ) from exc
-            raise RuntimeError(
-                f"LM Studio request timed out after {read_timeout}s of no data."
-            ) from exc
-        except requests.RequestException as exc:
-            raise RuntimeError(f"LM Studio request failed: {exc}") from exc
-
-    raise RuntimeError(f"LM Studio request failed: {last_err}")
-
-
-# ---------------------------------------------------------------------------
-# Per-mode conversion entry points (dispatch to Ollama or LM Studio)
-# ---------------------------------------------------------------------------
-
 def convert_text_page(
     text:         str,
     label:        str,
@@ -1163,7 +984,6 @@ def convert_text_page(
     columns=COLUMNS_AUTO,
     pre_ordered:  bool = False,
 ) -> str:
-<<<<<<< Updated upstream
     lead = (
         "The following text has already been re-sequenced into correct "
         "reading order. Convert it to Markdown without reordering it:"
@@ -1175,24 +995,10 @@ def convert_text_page(
         "system": build_system_prompt("text", columns, pre_ordered=pre_ordered),
         "prompt": f"{lead}\n\n{text}",
     }
-=======
->>>>>>> Stashed changes
     print(f"  {label} (text) ... ", end="", flush=True)
-    t0 = time.time()
-    if is_lm_studio_url(ollama_url):
-        result = _post_streaming_openai(
-            ollama_url, model, SYSTEM_PROMPT_TEXT,
-            f"Convert the following PDF page text to Markdown:\n\n{text}",
-            None, read_timeout, cancel_event, num_ctx=num_ctx,
-        )
-    else:
-        payload = {
-            "model":  model,
-            "system": SYSTEM_PROMPT_TEXT,
-            "prompt": f"Convert the following PDF page text to Markdown:\n\n{text}",
-        }
-        result = _post_streaming(ollama_url, payload, read_timeout, cancel_event,
-                                 num_ctx=num_ctx)
+    t0     = time.time()
+    result = _post_streaming(ollama_url, payload, read_timeout, cancel_event,
+                             num_ctx=num_ctx)
     print(f" done ({time.time() - t0:.1f}s)")
     return result
 
@@ -1208,7 +1014,6 @@ def convert_page_vision(
     columns=COLUMNS_AUTO,
     is_region:    bool = False,
 ) -> str:
-<<<<<<< Updated upstream
     """
     Send a page image to the model (requires a multimodal model).
 
@@ -1223,26 +1028,10 @@ def convert_page_vision(
                    if is_region else "Convert this PDF page to Markdown."),
         "images": [b64_image],
     }
-=======
-    """Send a page image to the model (requires a multimodal model)."""
->>>>>>> Stashed changes
     print(f"  {label} (vision) ... ", end="", flush=True)
-    t0 = time.time()
-    if is_lm_studio_url(ollama_url):
-        result = _post_streaming_openai(
-            ollama_url, model, SYSTEM_PROMPT_VISION,
-            "Convert this PDF page to Markdown.",
-            b64_image, read_timeout, cancel_event, num_ctx=num_ctx,
-        )
-    else:
-        payload = {
-            "model":  model,
-            "system": SYSTEM_PROMPT_VISION,
-            "prompt": "Convert this PDF page to Markdown.",
-            "images": [b64_image],
-        }
-        result = _post_streaming(ollama_url, payload, read_timeout, cancel_event,
-                                 num_ctx=num_ctx)
+    t0     = time.time()
+    result = _post_streaming(ollama_url, payload, read_timeout, cancel_event,
+                             num_ctx=num_ctx)
     print(f" done ({time.time() - t0:.1f}s)")
     return result
 
@@ -1289,31 +1078,16 @@ def convert_page_hybrid(
         f"{extracted_text.strip()}\n"
         "```\n"
     )
-<<<<<<< Updated upstream
     payload = {
         "model":  model,
         "system": build_system_prompt("hybrid", columns, pre_ordered=pre_ordered),
         "prompt": prompt,
         "images": [b64_image],
     }
-=======
->>>>>>> Stashed changes
     print(f"  {label} (hybrid) ... ", end="", flush=True)
-    t0 = time.time()
-    if is_lm_studio_url(ollama_url):
-        result = _post_streaming_openai(
-            ollama_url, model, SYSTEM_PROMPT_HYBRID, prompt,
-            b64_image, read_timeout, cancel_event, num_ctx=num_ctx,
-        )
-    else:
-        payload = {
-            "model":  model,
-            "system": SYSTEM_PROMPT_HYBRID,
-            "prompt": prompt,
-            "images": [b64_image],
-        }
-        result = _post_streaming(ollama_url, payload, read_timeout, cancel_event,
-                                 num_ctx=num_ctx)
+    t0     = time.time()
+    result = _post_streaming(ollama_url, payload, read_timeout, cancel_event,
+                             num_ctx=num_ctx)
     print(f" done ({time.time() - t0:.1f}s)")
     return result
 

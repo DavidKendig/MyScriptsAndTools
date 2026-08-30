@@ -66,13 +66,11 @@ _check_dependencies()
 # All dependencies present — safe to import now.
 from pdf_to_markdown import (  # noqa: E402
     CancelledError,
-    DEFAULT_LM_STUDIO,
     DEFAULT_MODEL,
     DEFAULT_OLLAMA,
     NUM_CTX,
     collect_pdfs,
     convert_pdf,
-    detect_lm_studio_models,
     resolve_output,
 )
 
@@ -127,27 +125,15 @@ class App(tk.Tk):
         self._worker: threading.Thread | None = None
         self._cancel_event = threading.Event()
 
-        # --- backend detection: prefer LM Studio if it has a loaded model ---
-        # If LM Studio is running with at least one model loaded, the GUI
-        # auto-targets that model. Otherwise we fall back to Ollama with the
-        # models listed in models.csv (the original behavior).
-        lm_models = detect_lm_studio_models(DEFAULT_LM_STUDIO)
-        self._backend = "lmstudio" if lm_models else "ollama"
-
-        if self._backend == "lmstudio":
-            self._available_models = lm_models
-            default_model = lm_models[0]
-            default_url   = DEFAULT_LM_STUDIO
-        else:
-            self._available_models = _load_models()
-            default_model = self._available_models[0] if self._available_models else DEFAULT_MODEL
-            default_url   = DEFAULT_OLLAMA
+        # --- load models from CSV ---
+        self._available_models = _load_models()
+        default_model = self._available_models[0] if self._available_models else DEFAULT_MODEL
 
         # --- tk variables ---
         self.input_path  = tk.StringVar()
         self.output_path = tk.StringVar()
         self.model_var   = tk.StringVar(value=default_model)
-        self.url_var     = tk.StringVar(value=default_url)
+        self.url_var     = tk.StringVar(value=DEFAULT_OLLAMA)
         self.mode_var    = tk.StringVar(value="auto")
         self.columns_var = tk.StringVar(value="auto")
         self.start_page  = tk.IntVar(value=1)
@@ -159,20 +145,6 @@ class App(tk.Tk):
 
         self._build_ui()
         self._poll_log()
-
-        # Announce which backend we're talking to.
-        if self._backend == "lmstudio":
-            self._append_log(
-                f"LM Studio detected at {DEFAULT_LM_STUDIO} — using loaded model: "
-                f"{default_model}\n"
-                f"(To use Ollama instead, stop the LM Studio server and relaunch.)\n\n"
-            )
-        else:
-            self._append_log(
-                f"Using Ollama at {DEFAULT_OLLAMA}. "
-                "(LM Studio not detected — start LM Studio's local server with a "
-                "loaded model to use it instead.)\n\n"
-            )
 
     # ------------------------------------------------------------------
     # UI construction
@@ -257,7 +229,6 @@ class App(tk.Tk):
         ttk.Spinbox(settings_frame, textvariable=self.start_page, from_=1, to=9999,
                      width=6).grid(row=0, column=5, sticky=tk.W)
 
-<<<<<<< Updated upstream
         ttk.Label(settings_frame, text="Columns:").grid(
             row=1, column=0, sticky=tk.W, padx=(0, 6), pady=(6, 0))
         ttk.Combobox(
@@ -271,10 +242,6 @@ class App(tk.Tk):
         ).grid(row=1, column=2, columnspan=4, sticky=tk.W, pady=(6, 0))
 
         ttk.Label(settings_frame, text="Ollama URL:").grid(row=2, column=0, sticky=tk.W, padx=(0, 6), pady=(6, 0))
-=======
-        url_label = "LM Studio URL:" if self._backend == "lmstudio" else "Ollama URL:"
-        ttk.Label(settings_frame, text=url_label).grid(row=1, column=0, sticky=tk.W, padx=(0, 6), pady=(6, 0))
->>>>>>> Stashed changes
         ttk.Entry(settings_frame, textvariable=self.url_var).grid(
             row=2, column=1, columnspan=5, sticky=tk.EW, pady=(6, 0))
 

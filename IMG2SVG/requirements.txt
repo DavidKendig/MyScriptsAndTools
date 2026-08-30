@@ -1,0 +1,5 @@
+requests
+Pillow
+numpy
+opencv-python
+pillow-heif
